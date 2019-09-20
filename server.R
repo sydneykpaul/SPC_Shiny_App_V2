@@ -2,7 +2,7 @@
 ## Title: SPC_ShinyApp
 ## Author: Sydney Paul
 ## Date Created: 6/5/2019 
-## Date Modified: 7/24/2019
+## Date Modified: 09/20/2019
 ## 
 ## Description: server.R file
 ## Allows users to upload a csv or excel file. 
@@ -12,8 +12,9 @@
 ## Run at the command line using:
 ## runApp('./spc_shiny_app')
 ###########################################
+source('dataToChartFunction.R')
 
-
+ 
 # Load necessary libraries
 library(ggplot2) # for general plotting
 library(lubridate) # for easier date/time casting
@@ -26,90 +27,7 @@ library(gridExtra) # for creating multi-graph plots
 library(shiny)
 library(plotly)
 library(tidyverse)
-
-
-plotSPC <- function(subgroup, point, mean, sigma, k = 3,
-                    ucl.show = TRUE, lcl.show = TRUE,
-                    band.show = TRUE, rule.show = TRUE,
-                    ucl.max = Inf, lcl.min = -Inf,
-                    label.x = "Subgroup", label.y = "Value") {
-  # Plots control chart with ggplot
-  ##
-  # Args:
-  # subgroup: Subgroup definition (for x-axis)
-  # point: Subgroup sample values (for y-axis)
-  # mean: Process mean value (for center line)
-  # sigma: Process variation value (for control limits)
-  # k: Specification for k-sigma limits above and below center line, default is 3
-  # ucl.show: Visible upper control limit? Default is true
-  # lcl.show: Visible lower control limit? Default is true
-  # band.show: Visible bands between 1-2 sigma limits? Default is true
-  # rule.show: Highlight run rule indicators in orange? Default is true
-  # ucl.max: Maximum feasible value for upper control limit
-  # lcl.min: Minimum feasible value for lower control limit
-  # label.x: Specify x-axis label
-  # label.y: Specify y-axis label
-  
-  df = data.frame(subgroup, point)
-  df$ucl = pmin(ucl.max, mean + k*sigma)
-  df$lcl = pmax(lcl.min, mean - k*sigma)
-  warn.points = function(rule, num, den) {
-    sets = mapply(seq, 1:(length(subgroup) - (den - 1)),
-                  den:length(subgroup))
-    hits = apply(sets, 2, function(x) sum(rule[x])) >= num
-    intersect(c(sets[,hits]), which(rule))
-  }
-  orange.sigma = numeric()
-  
-  p = ggplot(data = df, aes(x = subgroup)) +
-    geom_hline(yintercept = mean, col = "gray", size = 1)
-  if (ucl.show) {
-    p = p + geom_line(aes(y = ucl), col = "gray", size = 1)
-  }
-  if (lcl.show) {
-    p = p + geom_line(aes(y = lcl), col = "gray", size = 1)
-  }
-  if (band.show) {
-    p = p +
-      geom_ribbon(aes(ymin = mean + sigma,
-                      ymax = mean + 2*sigma), alpha = 0.1) +
-      geom_ribbon(aes(ymin = pmax(lcl.min, mean - 2*sigma),
-                      ymax = mean - sigma), alpha = 0.1)
-    orange.sigma = unique(c(
-      warn.points(point > mean + sigma, 4, 5),
-      warn.points(point < mean - sigma, 4, 5),
-      warn.points(point > mean + 2*sigma, 2, 3),
-      warn.points(point < mean - 2*sigma, 2, 3)
-    ))
-  }
-  df$warn = "blue"
-  if (rule.show) {
-    shift.n = round(log(sum(point!=mean), 2) + 3)
-    orange = unique(c(orange.sigma,
-                      warn.points(point > mean - sigma & point < mean + sigma, 15, 15),
-                      warn.points(point > mean, shift.n, shift.n),
-                      warn.points(point < mean, shift.n, shift.n)))
-    df$warn[orange] = "orange"
-  }
-  df$warn[point > df$ucl | point < df$lcl] = "red"
-  
-  
-  p_final <- p +
-    geom_line(aes(y = point), col = "royalblue3") +
-    geom_point(data = df, aes(x = subgroup, y = point, col = warn)) +
-    scale_color_manual(values = c("blue" = "royalblue3", "orange" = "orangered", "red" = "red3"), guide = FALSE) +
-    labs(x = label.x, y = label.y) +
-    theme_bw()
-  
-  ggplotly(p_final)
-}
-
-layout_ggplotly <- function(gg, x = -0.1, y = -0.03){
-  # The 1 and 2 goes into the list that contains the options for the x and y axis labels respectively
-  gg[['x']][['layout']][['annotations']][[1]][['y']] <- x
-  gg[['x']][['layout']][['annotations']][[2]][['x']] <- y
-  gg
-}
+# TODO: might need zoo for dataToChart function? 
 
 function(input, output, session) {
   # Hide all tabs from user at beginning
@@ -199,6 +117,8 @@ function(input, output, session) {
     updateCheckboxInput(session, 'facet', value = FALSE)
     
     updateSliderInput(session, 'bins', value = 30)
+    updateSliderInput(session, 'bin_width', value = 1)
+    updateCheckboxInput(session, 'histogramBinWidth', value = FALSE)
     
     updateCheckboxGroupInput(session, "checkGroup", label = "Run chart interpretation will be wrong or misleading unless:",
                              choices = list(
@@ -211,21 +131,24 @@ function(input, output, session) {
     updateSelectInput(session = session, "choose_control_plot", label = "Choose your SPC plot",
                       choices = list(
                         "None selected" = "none",
-                        "Run chart" = 'run',
-                        "EWMA chart" = "EWMA",
-                        "CUSUM chart" = "CUSUM",
-                        "I chart & MR chart" = 'imr',
-                        "x̄ chart & s chart" = "xbars",
-                        "p chart" = "p",
+                        "Run chart" = 'run chart',
+                        "i chart & mr chart" = 'I chart',
+                        "x-bar chart & s chart" = "X-bar chart",
+                        "p chart" = "p-chart",
+                        "p\'-chart" = "p\'-chart",
                         "np chart" = "np",
-                        "u chart" = "u", 
+                        "u chart" = "u-chart",
+                        "u\' chart" = "u\'-chart",
                         "c chart" = "c",
-                        "g chart" = "g",
-                        "t chart" = "t"
+                        "g chart" = "g-chart",
+                        "t chart" = "t-chart",
+                        "EWMA chart" = "EWMA chart",
+                        "CUSUM chart" = "CUSUM chart",
+                        "Moving Average" = "moving average"
                       ),
                       selected = "none"
     )
-    
+
     updateCheckboxInput(session, "should_break", value = FALSE)
     updateCheckboxInput(session, "already_grouped", value = TRUE)
     
@@ -264,23 +187,15 @@ function(input, output, session) {
     df <- fileData()
     if (input$y_col != 'SELECT') {
       choices_df <- df %>% dplyr::select(-c(input$x_col, input$y_col))
-      updateSelectInput(session, 'n_col', choices = c('SELECT', names(choices_df), 'NONE'))
+      updateSelectInput(session, 'n_col', choices = c('SELECT', names(choices_df)))
     } 
   })
   
   observeEvent(input$n_col,  {
     df <- fileData()
     if (input$n_col != 'SELECT') {
-      if (input$n_col == 'NONE') {
-        choices_df <- df %>% dplyr::select(-c(input$x_col, input$y_col)) 
-        updateSelectInput(session, 'f_col', choices = c('SELECT', names(choices_df), 'NONE')) 
-        
-      } else {
-      # f_col lines aren't necessary right now as we display all columns as options in renderUI for f_col
-      # if want to restrict to unused columns, will have to start here
-      choices_df <- df %>% dplyr::select(-c(input$x_col, input$y_col, input$n_col))
-      updateSelectInput(session, 'f_col', choices = c('SELECT', names(choices_df), 'NONE'))
-      }
+      choices_df <- df %>% dplyr::select(-c(input$x_col, input$y_col)) 
+      updateSelectInput(session, 'f_col', choices = c('SELECT', names(choices_df))) 
     }
   })
   
@@ -289,7 +204,7 @@ function(input, output, session) {
     
     df <- fileData()
     
-    if (input$n_col == 'NONE') {
+    if (input$n_col == 'SELECT') {
       df[input$n_col] = rep(1,nrow(df))
     }
     if (input$facet) {
@@ -316,43 +231,63 @@ function(input, output, session) {
   # Tab 3 -----------------------------------------------------------------------------------------
   #### This is the tab that displays the EDA graphs and checks assumptions
   
+  output$histogramBinControl <- renderUI({
+    if (as.logical(input$histogramBinWidth)) {
+      sliderInput(inputId = "bin_width",
+                  label = "Adjust binwidth for histograms:",
+                  min = 0.25,
+                  max = 20,
+                  value = 1, 
+                  step = 0.25)
+    } else {
+      sliderInput(inputId = "bins",
+                  label = "Number of bins for histograms:",
+                  min = 1,
+                  max = 50,
+                  value = 30)
+    }
+  })
+  
   output$EDA_plot <- renderPlot({
-    eda_df <- formatData()    
+    eda_df <- formatData()  
+    
+    bins = switch(as.logical(input$histogramBinWidth) + 1, input$bins, NULL)
+    binwidth = switch(as.logical(input$histogramBinWidth) + 1, NULL, input$bin_width)
     
     if(input$facet) {
-      # Line plot with loess smoother for assessing trend
+      # Dot plot with loess smoother for assessing trend
       p1 <- ggplot(eda_df, aes(x = x, y = y, group = 1)) +  # all the data belongs to one group (default creates as many groups as observations)
         geom_smooth(method = 'loess', formula = y ~ x) +
-        geom_line() +
+        geom_point() +
         facet_wrap(~f) +
         theme_bw() +
         theme(axis.text.x = element_text(angle = 90)) +
-        labs(x = 'Subgroup', y = 'Value')
+        labs(x = input$x_col, y = input$y_col)
 
       # Histogram with density overlay
       p2 <- ggplot(eda_df, aes(y)) +
-        geom_histogram(aes(y = ..density..), color = "gray95", bins = input$bins) +
+        geom_histogram(aes(y = ..density..), color = "gray95", bins = bins, binwidth = binwidth) +
         geom_density(fill = "blue", alpha = 0.3) +
         facet_wrap(~f) +
         theme_bw() +
         theme(axis.text.x = element_text(angle = 90), axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
-        labs(x = paste0("Value per", " ", input$multiple, " patient days"))
+        labs(x = paste0(input$y_col, " per ", input$multiple, " patient days"))
 
     } else {
       # Line plot with loess smoother for assessing trend
       p1 <- ggplot(eda_df, aes(x = x, y = y, group = 1)) + # all the data belongs to one group (default creates as many groups as observations)
         geom_smooth(method = 'loess', formula = y ~ x) +
-        geom_line() +
+        geom_point() +
         theme_bw() +
-        labs(x = 'Subgroup', y = 'Value')
+        labs(x = input$x_col, y = input$y_col)
       
       # Histogram with density overlay
       p2 <- ggplot(eda_df, aes(y)) +
-        geom_histogram(aes(y = ..density..), color = "gray95", bins = input$bins) +
+        geom_histogram(aes(y = ..density..), color = "gray95", bins = bins, binwidth = binwidth) +
         geom_density(fill = "blue", alpha = 0.3) +
         theme_bw() +
         theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) + 
-        labs(x = paste0("Value per", " ", input$multiple, " patient days"))
+        labs(x = paste0(input$y_col, " per ", input$multiple, " patient days"))
     }
     
     grid.arrange(p1, p2)
@@ -439,73 +374,56 @@ function(input, output, session) {
   # Tab 4 -----------------------------------------------------------------------------------------
   #### This is the tab that displays the run chart
   
-  get_run_chart <- reactive({
+  
+  output$SPC_run_plot <- renderPlotly({
     df <- formatData()
-    if(input$facet) {
-      run_chart <- qicharts2::qic(x = x, y = y, n = n, data = df, 
-                                  multiply = as.numeric(input$multiple),
-                                  chart = 'run',
-                                  agg.fun = input$agg_fun, 
-                                  ylab = paste0("Value per", " ", input$multiple, " patient days"), 
-                                  xlab = input$pregrouped_on, 
-                                  title = 'Run Chart',
-                                  facets = ~f,
-                                  x.angle = 45)      
-    } else {
-      run_chart <- qicharts2::qic(x = x, y = y, n = n, data = df, 
-                                  multiply = as.numeric(input$multiple),
-                                  chart = 'run',
-                                  agg.fun = input$agg_fun,
-                                  ylab = paste0("Value per", " ", input$multiple, " patient days"), 
-                                  xlab = input$pregrouped_on, 
-                                  title = 'Run Chart')
-    }
-    run_chart
+    dataToChart(df = df, 
+                chart_type = 'run chart',
+                xLabel = input$x_col,
+                yLabel = paste0(input$y_col, " per ", input$multiple, " patient days"),
+                multiple = input$multiple)
   })
   
-  
-  output$SPC_run_plot <- renderPlot({show(get_run_chart())})
-  
   output$run_chart_summary <- renderTable({
-    summary(get_run_chart())
+    # summary(get_run_chart())
   })
   
   output$summary_checks <- renderText({
-    chart_summary <- summary(get_run_chart())
-    message <- c()
-
-    for (i in 1:nrow(chart_summary)) {
-      # check number of useful observations
-      if (chart_summary[i,]$n.obs >= chart_summary[i,]$n.useful) {
-        m <- paste0(chart_summary[i,]$facet1, "<span class='pass'> - PASS: the number of observations is greater or equal to the number useful.</span><br/>")
-        message <- c(message, m)
-      }
-      else {
-        m <- paste0(chart_summary[i,]$facet1, "<span class='fail'> - FAIL: the number of observations is NOT greater or equal to the number useful.</span><br/>")
-        message <- c(message, m)
-      }     
-      
-      # check longest run 
-      if (chart_summary[i,]$longest.run.max > chart_summary[i,]$longest.run) {
-        m <- paste0(chart_summary[i,]$facet1, "<span class='pass'> - PASS: the longest run is less than the max allowed.</span><br/>")
-        message <- c(message, m)
-      }
-      else {
-        m <- paste0(chart_summary[i,]$facet1, "<span class='fail'> - FAIL: the longest run is greater than allowed.</span><br/>")
-        message <- c(message, m)
-      }
-      # check number of crossings
-      if (chart_summary[i,]$n.crossings >= chart_summary[i,]$n.crossings.min) {
-        m <- paste0(chart_summary[i,]$facet1, "<span class='pass'> - PASS: there are enough crossings.</span><br/>")
-        message <- c(message, m)
-      }
-      else {
-        m <- paste0(chart_summary[i,]$facet1, "<span class='fail'> - FAIL: there are not enough crossings.</span><br/>")
-        message <- c(message, m)
-      }
-      message <- c(message, '<br/>', '<br/>')
-    }
-    return(message)
+    # chart_summary <- summary(get_run_chart())
+    # message <- c()
+    # 
+    # for (i in 1:nrow(chart_summary)) {
+    #   # check number of useful observations
+    #   if (chart_summary[i,]$n.obs >= chart_summary[i,]$n.useful) {
+    #     m <- paste0(chart_summary[i,]$facet1, "<span class='pass'> - PASS: the number of observations is greater or equal to the number useful.</span><br/>")
+    #     message <- c(message, m)
+    #   }
+    #   else {
+    #     m <- paste0(chart_summary[i,]$facet1, "<span class='fail'> - FAIL: the number of observations is NOT greater or equal to the number useful.</span><br/>")
+    #     message <- c(message, m)
+    #   }     
+    #   
+    #   # check longest run 
+    #   if (chart_summary[i,]$longest.run.max > chart_summary[i,]$longest.run) {
+    #     m <- paste0(chart_summary[i,]$facet1, "<span class='pass'> - PASS: the longest run is less than the max allowed.</span><br/>")
+    #     message <- c(message, m)
+    #   }
+    #   else {
+    #     m <- paste0(chart_summary[i,]$facet1, "<span class='fail'> - FAIL: the longest run is greater than allowed.</span><br/>")
+    #     message <- c(message, m)
+    #   }
+    #   # check number of crossings
+    #   if (chart_summary[i,]$n.crossings >= chart_summary[i,]$n.crossings.min) {
+    #     m <- paste0(chart_summary[i,]$facet1, "<span class='pass'> - PASS: there are enough crossings.</span><br/>")
+    #     message <- c(message, m)
+    #   }
+    #   else {
+    #     m <- paste0(chart_summary[i,]$facet1, "<span class='fail'> - FAIL: there are not enough crossings.</span><br/>")
+    #     message <- c(message, m)
+    #   }
+    #   message <- c(message, '<br/>', '<br/>')
+    # }
+    # return(message)
   })
   
   observeEvent(input$tab4to5, {
@@ -535,7 +453,7 @@ function(input, output, session) {
   })
   
   output$aggFunControl <- renderUI({
-    if (input$choose_control_plot == 'run' || input$choose_control_plot == 'imr')
+    if (input$choose_control_plot == 'run chart' || input$choose_control_plot == 'I chart')
     {
       selectInput("agg_fun", label = "Aggregate function for summarising the y variable if there are more than one observation per subgroup",
                   choices = list('mean' = 'mean', 'median' = 'median', 'sum' = 'sum', 'sd' = 'sd'),
@@ -562,91 +480,31 @@ function(input, output, session) {
     }
   })
   
-  get_EWMA_chart <- reactive({
-    df <- formatData()
-    
-    subgroup.x = unique(df$x)
-    subgroup.s = subgroup.x
-    
-    point.x = aggregate(df$y, by = list(df$x), FUN = mean, na.rm = TRUE)$x
-    point.s = aggregate(df$y, by = list(df$x), FUN = sd, na.rm = TRUE)$x
-    
-    mean.x = mean(df$y)
-    sample.n = as.numeric(table(df$x))
-    mean.s = sqrt(sum((sample.n - 1) * point.s ^ 2) / (sum(sample.n) - length(sample.n)))
-    sigma.x = mean.s / sqrt(sample.n)
-    c4 = sqrt(2 / (sample.n - 1)) * gamma(sample.n / 2) /
-      gamma((sample.n - 1) / 2)
-    sigma.s = mean.s * sqrt(1 - c4 ^ 2)
-    
-    # Calculate control chart inputs
-    subgroup.z = subgroup.x
-    lambda = 0.2
-    point.z = matrix(data = NA, nrow = length(point.x))
-    point.z[1] = mean.x
-    for (i in 2:length(point.z)) {
-      point.z[i] = lambda * point.x[i] + (1 - lambda) * point.z[i-1]
+  output$overdispersion_results <- renderPrint({
+    if (input$choose_control_plot == 'u-chart' | input$choose_control_plot == 'p-chart') {
+      df <- formatData()
+      od_result <- overdispersion.test(df$y, df$n, input$choose_control_plot)
+      return(od_result)
     }
-    mean.z = mean.x
-    sigma.z = (mean.s / sqrt(sample.n)) *
-      sqrt(lambda/(2-lambda) * (1 - (1-lambda)^(seq(1:length(point.z)))))
-    
-    plotSPC(subgroup.z, point.z, mean.z, sigma.z, k = 3, band.show = FALSE,
-            rule.show = FALSE, 
-            label.x = switch(input$already_grouped + 1, input$subgroup_on, input$pregrouped_on),
-            label.y = paste0("Value per ", input$multiple, " patient days moving average")) 
   })
   
-  get_CUSUM_chart <- reactive({
-    df <- formatData()
-    
-    subgroup.x = unique(df$x)
-    subgroup.s = subgroup.x
-    
-    point.x = aggregate(df$y, by = list(df$x), FUN = mean, na.rm = TRUE)$x
-    point.s = aggregate(df$y, by = list(df$x), FUN = sd, na.rm = TRUE)$x
-    
-    mean.x = mean(df$y)
-    sample.n = as.numeric(table(df$x))
-    mean.s = sqrt(sum((sample.n - 1) * point.s ^ 2) / (sum(sample.n) - length(sample.n)))
-    sigma.x = mean.s / sqrt(sample.n)
-    c4 = sqrt(2 / (sample.n - 1)) * gamma(sample.n / 2) /
-      gamma((sample.n - 1) / 2)
-    sigma.s = mean.s * sqrt(1 - c4 ^ 2)
-    
-    subgroup.cusum = subgroup.x
-    slack = 0.5
-    zscore = (point.x - mean.x)/sigma.x
-    
-    point.cusuml = matrix(data = NA, nrow = length(zscore))
-    point.cusuml[1] = -max(0, -zscore[1] - slack)
-    
-    for (i in 2:length(point.cusuml)) {
-      point.cusuml[i] = -max(0, -zscore[i] - slack - point.cusuml[i-1])
+  output$overdispersion_text <- renderText({
+    if (input$choose_control_plot == 'u-chart' | input$choose_control_plot == 'u\'-chart' | input$choose_control_plot == 'p-chart' | input$choose_control_plot == 'p\'-chart') {
+      df <- formatData()
+      od_result <- overdispersion.test(df$y, df$n, input$choose_control_plot)
+      
+      if (od_result$p_value > 0.05) {
+        m <- paste0("<span class='fail'>FAIL: Use prime chart instead </span><br/>")
+      } else {
+        m <- paste0("<span class='pass'>PASS: Overdispersion is not a problem </span><br/>")
+      }
+      
+    } else {
+      m <- "You do not have to account for overdispersion with this type of chart."
     }
     
-    point.cusumh = matrix(data = NA, nrow = length(zscore))
-    point.cusumh[1] = max(0, zscore[1] - slack)
-    
-    for (i in 2:length(point.cusuml)) {
-      point.cusumh[i] = max(0, zscore[i] - slack - point.cusumh[i - 1])
-    }
-    
-    mean.cusum = 0
-    sigma.cusum = rep(1, length(subgroup.cusum))
-    
-    # Plot CUSUM chart
-    lower.plot = plotSPC(subgroup.cusum, point.cusuml, mean.cusum, sigma.cusum,
-                          k = 5, band.show = FALSE, rule.show = FALSE,
-                          label.y = paste0("Value per ", input$multiple, " patient days cumulative sum"), 
-                          label.x = switch(input$already_grouped + 1, input$subgroup_on, input$pregrouped_on))
-    p_final <- lower.plot + geom_line(aes(y = point.cusumh), col = "royalblue3") +
-      geom_point(aes(y = point.cusumh), col = "royalblue3")
-    
-    ggplotly(p_final)
+    return(m)
   })
-  
-  # TODO: EWMA and CUSUM faceted? Subgrouped? Breaks? 
 
   get_breaks <- reactive({
     req(input$break_col)
@@ -707,13 +565,32 @@ function(input, output, session) {
   })
   
   chartChange <- reactive({
-    list(input$should_break, input$choose_control_plot, input$break_col, input$already_grouped, input$subgroup_on, input$agg_fun, input$break_date)
+    list(input$should_break, 
+         input$choose_control_plot, 
+         input$break_col, 
+         input$already_grouped, 
+         input$subgroup_on, 
+         input$agg_fun, 
+         input$break_date)
   })
   
   observeEvent(chartChange(), {
     if (input$choose_control_plot == "none") {
       output$control_plot <- renderPlotly({})
       return();
+    }
+    
+    if (input$choose_control_plot == 'np') {
+      output$control_plot <- renderPlotly({
+        plotly_empty() %>% layout(title = str_wrap("For proportion data, prefer p-charts to np-charts. In most cases, we do not have a constant denominator, so np-charts would not be appropriate. Even when we do, using a p-chart helps reduce audience confusion by explicitly stating the 'per x'."))
+      })
+      return()
+    }
+    if (input$choose_control_plot == 'c') {
+      output$control_plot <- renderPlotly({
+        plotly_empty() %>% layout(title = str_wrap("For count data, prefer u-charts to c-charts. In most cases, we do not have a constant denominator, so c-charts would not be appropriate. Even when we do, using a u-chart helps reduce audience confusion because you are explicitly stating the 'per x'."))
+      })
+      return()      
     }
 
     df <- formatData()
@@ -723,89 +600,18 @@ function(input, output, session) {
     xperiod = switch(input$already_grouped + 1, input$subgroup_on, NULL)
     parts = switch(input$should_break + 1, NULL, get_breaks())
     facet = switch(input$facet + 1, NULL, ~f)
-    aggfun = switch((input$choose_control_plot == 'run' || input$choose_control_plot == 'imr') + 1, NULL, input$agg_fun)
+    aggfun = switch((input$choose_control_plot == 'run chart' || input$choose_control_plot == 'I chart') + 1, NULL, input$agg_fun)
     
-      
-    if (input$choose_control_plot == "EWMA") {
-        output$control_plot <- renderPlotly(get_EWMA_chart())
-        
-    } else if (input$choose_control_plot == 'CUSUM') {
-        output$control_plot <- renderPlotly(get_CUSUM_chart())
-      
-    } else if (input$choose_control_plot == 'np') {
-        output$control_plot <- renderPlotly({
-          ggplotly(ggplot(tibble(x = 1, y = 1), aes(x, y)) + 
-            geom_point() + 
-            labs(title = "p-charts are prefered", x = '', y = ''))
-        })
-      
-    } else if (input$choose_control_plot == 'imr' || input$choose_control_plot == 'xbars') {
-      if (input$choose_control_plot == 'imr') {
-        title1 = 'I chart'
-        chart1 = 'i'
-        
-        title2 = 'MR chart'
-        chart2 = 'mr'
-        
-      } else {
-        title1 = 'xbar chart'
-        chart1 = 'xbar'
-        
-        title2 = 's chart'
-        chart2 = 's'
-      }
-      
-      p1 <- ggplotly(
-               qicharts2::qic(x = x, y = y, n = n, data = df, multiply = as.numeric(input$multiple),
-                     ylab = paste0("Value per", " ", input$multiple, " patient days"), xlab = xlabel,
-                     title = title1,
-                     chart = chart1,
-                     x.period = xperiod,
-                     part = parts,
-                     facets = facet,
-                     agg.fun = aggfun,
-                     show.labels = TRUE)
-      )
-      
-      p2 <- ggplotly(
-                qicharts2::qic(x = x, y = y, n = n, data = df, multiply = as.numeric(input$multiple),
-                     ylab = paste0("Value per", " ", input$multiple, " patient days"), xlab = xlabel,
-                     title = paste0(title1, " (top), ", title2, " (bottom)"),
-                     chart = chart2,
-                     x.period = xperiod,
-                     part = parts,
-                     facets = facet,
-                     show.labels = TRUE)
-      )
-      
-      output$control_plot <- renderPlotly({
-        plotly::subplot(p1, p2, nrows = 2, titleX = T, titleY = T, widths = c(1,0)) %>% 
-          plotly::layout(yaxis = list(domain = c(0, 0.35), axis.automargin = T), yaxis2 = list(domain = c(0.65, 1), axis.automargin = T),
-                 xaxis = list(domain = c(0, 1), axis.automargin = T), xaxis2 = list(domain = c(0, 1), axis.automargin = T),
-                 margin=list(l = 100))
-
-      })
-      
-    } else {
-        output$control_plot <- renderPlotly({
-          p <- ggplotly(
-            qicharts2::qic(x = x, y = y, n = n, data = df, multiply = as.numeric(input$multiple),
-                         ylab = paste0("Value per", " ", input$multiple, " patient days"), xlab = xlabel,
-                         title = paste0(input$choose_control_plot, " ", "chart"),
-                         chart = input$choose_control_plot,
-                         x.period = xperiod,
-                         part = parts,
-                         facets = facet,
-                         agg.fun = aggfun,
-                         x.angle = 45,
-                         show.labels = TRUE)
-          ) %>% layout(margin=list(l = 100))
-          if (input$facet) {
-            p <- p %>% layout_ggplotly()
-          }
-          p
-      })
-    }
+    output$control_plot <- renderPlotly({
+      dataToChart(df = df, 
+                  chart_type = input$choose_control_plot,
+                  xLabel = input$x_col,
+                  yLabel = paste0(input$y_col, " per ", input$multiple, " patient days"),
+                  multiple = input$multiple,
+                  already_subgrouped = input$already_grouped, 
+                  subgroup_on = input$subgroup_on,
+                  should_break = FALSE)
+    })
   })
   
   
