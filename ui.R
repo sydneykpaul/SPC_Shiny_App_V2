@@ -2,20 +2,20 @@
 ## Title: SPC_ShinyApp
 ## Author: Sydney Paul
 ## Date Created: 6/5/2019 
-## Date Modified: 7/24/2019
+## Date Modified: 11/5/2019
 ## 
 ## Description: ui.R file
 ## Allows users to upload a csv or excel file. 
 ## Runs basic EDA. Checks assumptions are valid for run chart. 
 ## Walks user through creation of run and control charts. 
-## 
+##
 ## Run at the command line using:
 ## runApp('./spc_shiny_app')
 ###########################################
-
+ 
 # Load necessary libraries
 library(tidyverse)
-library(ggplot2) # for general plotting
+library(ggplot2) # for general plotting 
 library(lubridate) # for easier date/time casting
 library(forecast) # for plotting and forecasts
 library(qicharts2) # for simple run charts and control charts
@@ -24,7 +24,7 @@ library(ggseas) # for on-the-fly seasonal adjustment plotting
 library(ggExtra) # for making line+histogram marginal plots
 library(gridExtra) # for creating multi-graph plots
 library(shiny)
-library(plotly)
+library(plotly) 
 library(shinythemes)
 
 
@@ -65,7 +65,7 @@ navbarPage(
         fluidRow(
           textOutput("upload_feedback"),
           br(),
-          dataTableOutput("contents")
+          DT::dataTableOutput("contents")
         ),
         
         fluidRow(
@@ -98,6 +98,8 @@ navbarPage(
       fluidRow(
         h4("Match variables with column names:"),
         selectInput('x_col', "Date column or subgroups (values to plot along the x axis)", choices = NULL), 
+        h2(textOutput(outputId = "not_date_warning")),
+        
         selectInput('y_col', "Numerator (measures or counts to plot on the y axis)", choices = NULL),
         selectInput('n_col', "Denominator (subgroup sizes)", choices = NULL),
         
@@ -108,8 +110,8 @@ navbarPage(
       ),
       
       fluidRow (
-          column(width = 1, offset = 10,
-                 actionButton("tab2to3", "Continue"))
+        column(width = 1, offset = 10,
+               actionButton("tab2to3", "Continue"))
       )
     )
   ),
@@ -157,11 +159,9 @@ navbarPage(
         br(), 
         
         h3("Distributions:"),
-        sliderInput(inputId = "bins",
-                    label = "Number of bins for histograms:",
-                    min = 1,
-                    max = 50,
-                    value = 30),
+        uiOutput('histogramBinControl'),
+        checkboxInput("histogramBinWidth", "Check this box if you would rather change the binwidth of the histogram", value = FALSE),
+        
         br(),
         br(),
         
@@ -170,7 +170,9 @@ navbarPage(
           tags$ul(
             tags$li("For either run charts or control charts, the data points must be independent for the guidelines to be effective.
                     The first test of that is conceptual—do you expect that one value in this series will influence a subsequent
-                    value?")
+                    value?"),
+            tags$li("In the ACF plot, look for repetitive patterns and/or peaks that extend beyond the blue lines, which suggest that autocorrelation is present."),
+            tags$li("In the Spectrum plot, look for repetitive patterns and/or peaks, which suggest cyclical or seasonal effects (at a period of 1 / frequency).")
             )
         ),
         
@@ -204,7 +206,7 @@ navbarPage(
       ),
       mainPanel(
         fluidRow(
-          plotOutput("EDA_plot", height = '800px')
+          plotOutput("EDA_plot", height = '500px')
         ),
         
         br(),
@@ -245,7 +247,7 @@ navbarPage(
       br(),
       
       fluidRow(
-        plotOutput("SPC_run_plot", height = '800px'),
+        uiOutput("SPC_run_plots", height = '800px'),
         
         h2("Run Chart Analysis"),
         tableOutput("run_chart_summary")
@@ -291,17 +293,20 @@ navbarPage(
         selectInput("choose_control_plot", label = "Choose your SPC plot",
           choices = list(
             "None selected" = "none",
-            "Run chart" = 'run',
-            "EWMA chart" = "EWMA",
-            "CUSUM chart" = "CUSUM",
-            "I chart & MR chart" = 'imr',
-            "x̄ chart & s chart" = "xbars",
-            "p chart" = "p",
+            "Run chart" = 'run chart',
+            "I chart & MR chart" = 'I+MR chart',
+            "x̄ chart & s chart" = "X-bar+S chart",
+            "p chart" = "p-chart",
+            "p\'-chart" = "p\'-chart",
             "np chart" = "np",
-            "u chart" = "u", 
+            "u chart" = "u-chart",
+            "u\' chart" = "u\'-chart",
             "c chart" = "c",
-            "g chart" = "g",
-            "t chart" = "t"
+            "g chart" = "g-chart",
+            "t chart" = "t-chart",
+            "EWMA chart" = "EWMA chart",
+            "CUSUM chart" = "CUSUM chart",
+            "Moving Average" = "moving average"
           ),
           selected = "none"
         ),
@@ -314,20 +319,47 @@ navbarPage(
         uiOutput('breakDateCalendar'),
         
         checkboxInput('already_grouped', "Data has already been grouped", value = TRUE),
-        uiOutput("groupedControls")
+        uiOutput("groupedControls"),
+        
+        br(),
+        br(),
+        br(),
+        br(),
+        
+        h5("Overdispersion test for u-chart and p-chart"),
+        verbatimTextOutput('overdispersion_results'),
+        htmlOutput("overdispersion_text"),
+        
+        br(),
+        br(),
+        br(),
+        br(),
+        
+        h4("Advanced Plot Options"),
+        checkboxInput('y_negative', "Y-axis can be negative", value = TRUE),
+        
+        checkboxInput("user_xlabel", "I want to change the X-axis name.", value = FALSE),
+        uiOutput("user_xlabel_textbox"),
+        checkboxInput("user_ylabel", "I want to change the Y-axis name.", value = FALSE),
+        uiOutput("user_ylabel_textbox"),
+        
+        checkboxInput("user_benchmark", "I want to add a benchmark.", value = FALSE),
+        uiOutput("user_benchmark_box"),
+        checkboxInput("user_target", "I want to add a target.", value = FALSE),
+        uiOutput("user_target_box"),
+        checkboxInput("user_annotate", "I want to annotate specific points.", value = FALSE)
       ),
       
       column(width = 10,
       fluidRow(
-        plotlyOutput("control_plot", height = '800px'),
-        verbatimTextOutput('not_available')
+        uiOutput("control_plots"),
+        uiOutput("user_annotate_box")
       ))),
       
       fluidRow(
                actionButton("return_to_start", "Startover with a new file"),
                # downloadButton("save_plot", "Save your plot as .png"), # TODO: with plotly don't need this anymore??
                actionButton("quit_app", "Quit")
-        
       )
     )
   ),
